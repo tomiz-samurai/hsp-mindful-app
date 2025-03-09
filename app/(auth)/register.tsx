@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Image, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/auth/useAuth';
 import { Typography } from '@/components/ui/atoms/Typography';
@@ -8,21 +8,38 @@ import { TextInput } from '@/components/ui/atoms/TextInput';
 import { colors } from '@/styles/theme/colors';
 
 /**
- * ログイン画面
+ * 新規登録画面
  */
-export default function LoginScreen() {
+export default function RegisterScreen() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signUp } = useAuth();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // ログイン処理
-  const handleLogin = async () => {
-    if (!email || !password) {
-      setError('メールアドレスとパスワードを入力してください');
+  // 新規登録処理
+  const handleRegister = async () => {
+    // 入力検証
+    if (!email) {
+      setError('メールアドレスを入力してください');
+      return;
+    }
+    
+    if (!password) {
+      setError('パスワードを入力してください');
+      return;
+    }
+    
+    if (password !== confirmPassword) {
+      setError('パスワードが一致しません');
+      return;
+    }
+    
+    if (password.length < 6) {
+      setError('パスワードは6文字以上で入力してください');
       return;
     }
     
@@ -30,14 +47,18 @@ export default function LoginScreen() {
     setError(null);
     
     try {
-      const { success, error } = await signIn(email, password);
+      const { success, error } = await signUp(email, password);
       
-      if (!success && error) {
+      if (success) {
+        // 成功メッセージを表示
+        // 注: 実際にはメール確認などの処理が必要かもしれません
+        router.push('/login');
+      } else if (error) {
         setError(error);
       }
     } catch (err) {
-      setError('ログイン中にエラーが発生しました');
-      console.error('Login error:', err);
+      setError('登録中にエラーが発生しました');
+      console.error('Registration error:', err);
     } finally {
       setIsLoading(false);
     }
@@ -49,22 +70,17 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* ロゴとタイトル */}
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('@/assets/images/owl-logo.png')} 
-            style={styles.logo}
-            resizeMode="contain"
-          />
+        {/* タイトル */}
+        <View style={styles.headerContainer}>
           <Typography variant="h2" style={styles.title}>
-            HSP Mindful
+            新規アカウント登録
           </Typography>
           <Typography variant="body" style={styles.subtitle}>
-            高感受性者のためのマインドフルネスアプリ
+            HSP Mindfulで心の安らぎを見つけましょう
           </Typography>
         </View>
         
-        {/* ログインフォーム */}
+        {/* 登録フォーム */}
         <View style={styles.formContainer}>
           {error && (
             <Typography variant="caption" style={styles.errorText}>
@@ -89,35 +105,34 @@ export default function LoginScreen() {
             style={styles.input}
           />
           
+          <TextInput
+            placeholder="パスワード（確認）"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            style={styles.input}
+          />
+          
           <Button
-            onPress={handleLogin}
-            style={styles.loginButton}
+            onPress={handleRegister}
+            style={styles.registerButton}
             loading={isLoading}
             disabled={isLoading}
           >
-            ログイン
-          </Button>
-          
-          <Button
-            variant="text"
-            onPress={() => router.push('/forgot-password')}
-            style={styles.forgotButton}
-          >
-            パスワードをお忘れですか？
+            アカウント作成
           </Button>
         </View>
         
-        {/* 新規登録リンク */}
-        <View style={styles.signupContainer}>
-          <Typography variant="body" style={styles.signupText}>
-            アカウントをお持ちでない方は
+        {/* ログインリンク */}
+        <View style={styles.loginContainer}>
+          <Typography variant="body" style={styles.loginText}>
+            すでにアカウントをお持ちの方は
           </Typography>
           <Button
-            variant="outline"
-            onPress={() => router.push('/register')}
-            style={styles.signupButton}
+            variant="text"
+            onPress={() => router.push('/login')}
           >
-            新規登録
+            ログイン
           </Button>
         </View>
       </ScrollView>
@@ -135,14 +150,9 @@ const styles = StyleSheet.create({
     padding: 20,
     justifyContent: 'center',
   },
-  logoContainer: {
+  headerContainer: {
     alignItems: 'center',
     marginBottom: 40,
-  },
-  logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 16,
   },
   title: {
     marginBottom: 8,
@@ -158,22 +168,15 @@ const styles = StyleSheet.create({
   input: {
     marginBottom: 16,
   },
-  loginButton: {
+  registerButton: {
     marginTop: 8,
   },
-  forgotButton: {
-    marginTop: 16,
-    alignSelf: 'center',
-  },
-  signupContainer: {
+  loginContainer: {
     alignItems: 'center',
   },
-  signupText: {
-    marginBottom: 12,
+  loginText: {
+    marginBottom: 8,
     color: colors.text.secondary,
-  },
-  signupButton: {
-    minWidth: 200,
   },
   errorText: {
     color: colors.status.error,

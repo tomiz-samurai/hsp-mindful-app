@@ -1,136 +1,84 @@
-import React, { useState } from 'react';
-import { View, TextInput as RNTextInput, StyleSheet, TouchableOpacity, StyleProp, ViewStyle, TextInputProps as RNTextInputProps } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { forwardRef } from 'react';
+import { 
+  TextInput as RNTextInput, 
+  TextInputProps as RNTextInputProps, 
+  StyleSheet, 
+  View,
+  Text,
+  StyleProp,
+  ViewStyle
+} from 'react-native';
 import { colors } from '@/styles/theme/colors';
-import { Typography } from './Typography';
 
-interface TextInputProps extends RNTextInputProps {
+export interface TextInputProps extends RNTextInputProps {
   label?: string;
   error?: string;
-  icon?: string;
-  iconPosition?: 'left' | 'right';
-  secureTextEntry?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
 /**
- * カスタムテキスト入力コンポーネント
- * HSPユーザー向けに視覚的に静かなスタイルを提供
+ * テキスト入力コンポーネント
+ * HSPアプリのスタイルに合わせたカスタムテキスト入力
  */
-export const TextInput = ({
-  label,
-  error,
-  icon,
-  iconPosition = 'left',
-  secureTextEntry = false,
-  style,
-  ...rest
-}: TextInputProps) => {
-  const [isSecureTextHidden, setIsSecureTextHidden] = useState(secureTextEntry);
-  const [isFocused, setIsFocused] = useState(false);
-  
+export const TextInput = forwardRef<RNTextInput, TextInputProps>((
+  { label, error, style, ...rest },
+  ref
+) => {
   return (
     <View style={[styles.container, style]}>
-      {label && (
-        <Typography variant="caption" style={styles.label}>
-          {label}
-        </Typography>
-      )}
+      {label && <Text style={styles.label}>{label}</Text>}
       
       <View style={[
         styles.inputContainer,
-        isFocused && styles.inputContainerFocused,
-        error && styles.inputContainerError
+        error ? styles.inputError : null
       ]}>
-        {icon && iconPosition === 'left' && (
-          <Ionicons name={icon} size={20} color={colors.text.secondary} style={styles.leftIcon} />
-        )}
-        
         <RNTextInput
-          style={[
-            styles.input,
-            icon && iconPosition === 'left' && styles.inputWithLeftIcon,
-            (icon && iconPosition === 'right') || secureTextEntry && styles.inputWithRightIcon
-          ]}
+          ref={ref}
+          style={styles.input}
           placeholderTextColor={colors.text.tertiary}
-          secureTextEntry={isSecureTextHidden}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
           {...rest}
         />
-        
-        {icon && iconPosition === 'right' && (
-          <Ionicons name={icon} size={20} color={colors.text.secondary} style={styles.rightIcon} />
-        )}
-        
-        {secureTextEntry && (
-          <TouchableOpacity
-            style={styles.rightIcon}
-            onPress={() => setIsSecureTextHidden(!isSecureTextHidden)}
-          >
-            <Ionicons
-              name={isSecureTextHidden ? 'eye-outline' : 'eye-off-outline'}
-              size={20}
-              color={colors.text.secondary}
-            />
-          </TouchableOpacity>
-        )}
       </View>
       
-      {error && (
-        <Typography variant="caption" style={styles.errorText}>
-          {error}
-        </Typography>
-      )}
+      {error && <Text style={styles.errorText}>{error}</Text>}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   label: {
-    marginBottom: 8,
-    color: colors.text.secondary,
+    fontFamily: 'NotoSansJP-Medium',
+    fontSize: 14,
+    color: colors.text.primary,
+    marginBottom: 6,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: 'white',
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.gray[300],
-    borderRadius: 8,
-    minHeight: 48,
-  },
-  inputContainerFocused: {
-    borderColor: colors.primary.DEFAULT,
-  },
-  inputContainerError: {
-    borderColor: colors.status.error,
+    overflow: 'hidden',
   },
   input: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    fontFamily: 'NotoSansJP-Regular',
     fontSize: 16,
     color: colors.text.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
-  inputWithLeftIcon: {
-    paddingLeft: 8,
-  },
-  inputWithRightIcon: {
-    paddingRight: 40,
-  },
-  leftIcon: {
-    paddingLeft: 16,
-  },
-  rightIcon: {
-    position: 'absolute',
-    right: 16,
+  inputError: {
+    borderColor: colors.status.error,
   },
   errorText: {
+    fontFamily: 'NotoSansJP-Regular',
+    fontSize: 12,
     color: colors.status.error,
     marginTop: 4,
+    marginLeft: 4,
   },
 });
+
+TextInput.displayName = 'TextInput';
