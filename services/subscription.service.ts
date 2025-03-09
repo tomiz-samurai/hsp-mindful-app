@@ -332,7 +332,7 @@ export class SubscriptionService {
       console.error('プレミアムステータス確認エラー:', error);
       
       // ローカルキャッシュを確認（オフライン時）
-      const isPremium = storage.getBoolean('is_premium') || false;
+      const isPremium = storage.getBoolean('is_premium');
       const premiumUntil = storage.getString('premium_until');
       
       if (isPremium && premiumUntil) {

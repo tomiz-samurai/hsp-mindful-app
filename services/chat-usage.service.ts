@@ -2,8 +2,8 @@ import { supabase } from '@/lib/supabase/client';
 import { storage } from '@/lib/utils/storage';
 
 /**
- * チャット使用量サービスクラス
- * フリーユーザーのチャット使用制限を管理
+ * チャット使用量管理サービスクラス
+ * 非プレミアムユーザーのチャット使用制限を管理
  */
 export class ChatUsageService {
   private static instance: ChatUsageService;
@@ -21,137 +21,172 @@ export class ChatUsageService {
   }
   
   /**
-   * ユーザーがチャットを使用できるかどうかを確認
-   * プレミアムユーザーは無制限、フリーユーザーは1日の上限あり
+   * チャットを使用できるかどうかチェック
    */
   public async canUseChat(userId: string): Promise<boolean> {
     try {
-      // ユーザープロフィールを取得してプレミアムかどうかを確認
-      const { data: profileData, error: profileError } = await supabase
+      // プレミアムユーザーかチェック
+      const isPremium = await this.isUserPremium(userId);
+      if (isPremium) {
+        return true; // プレミアムユーザーは制限なし
+      }
+      
+      // 当日の使用量を取得
+      const usage = await this.getDailyUsage(userId);
+      
+      // 最終リセットから24時間以上経過していればリセット
+      if (this.shouldResetDailyCount(usage.lastReset)) {
+        await this.resetDailyCount(userId);
+        return true;
+      }
+      
+      // 制限内かチェック
+      return usage.dayCount < usage.dayLimit;
+    } catch (error) {
+      console.error('使用制限チェックエラー:', error);
+      
+      // オフラインの場合はローカルキャッシュから確認
+      const isPremium = storage.getBoolean('is_premium') ?? false;
+      if (isPremium) return true;
+      
+      const dayCount = storage.getNumber('chat_day_count') ?? 0;
+      const dayLimit = storage.getNumber('chat_day_limit') ?? 5;
+      const lastReset = storage.getString('chat_last_reset');
+      
+      if (lastReset && this.shouldResetDailyCount(lastReset)) {
+        storage.set('chat_day_count', 0);
+        storage.set('chat_last_reset', new Date().toISOString());
+        return true;
+      }
+      
+      return dayCount < dayLimit;
+    }
+  }
+  
+  /**
+   * ユーザーがプレミアムかチェック
+   */
+  private async isUserPremium(userId: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase
         .from('profiles')
         .select('is_premium')
         .eq('id', userId)
         .single();
       
-      if (profileError) throw profileError;
+      if (error) throw error;
       
-      // プレミアムユーザーは常に使用可能
-      if (profileData.is_premium) {
-        return true;
-      }
-      
-      // 使用量を取得
+      return data.is_premium || false;
+    } catch (error) {
+      console.error('プレミアムチェックエラー:', error);
+      return storage.getBoolean('is_premium') ?? false;
+    }
+  }
+  
+  /**
+   * 日次の使用量を取得
+   */
+  private async getDailyUsage(userId: string): Promise<{
+    dayCount: number;
+    dayLimit: number;
+    lastReset: string;
+  }> {
+    try {
       const { data, error } = await supabase
         .from('chat_usage')
         .select('day_count, day_limit, last_reset')
         .eq('user_id', userId)
         .single();
       
-      // データがない場合は使用可能（初回使用）
-      if (error && error.code === 'PGRST116') {
-        return true;
-      } else if (error) {
+      if (error) {
+        // レコードがない場合は新規作成
+        if (error.code === 'PGRST116') {
+          const newUsage = await this.initializeUsage(userId);
+          return newUsage;
+        }
         throw error;
       }
       
-      // 最終リセットから24時間以上経過しているかどうかを確認
-      const lastReset = new Date(data.last_reset);
-      const now = new Date();
-      const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60);
-      
-      // 24時間以上経過していれば使用可能（カウントをリセットする）
-      if (hoursSinceReset >= 24) {
-        await this.resetUsage(userId);
-        return true;
-      }
-      
-      // 上限に達していなければ使用可能
-      return data.day_count < data.day_limit;
+      return {
+        dayCount: data.day_count,
+        dayLimit: data.day_limit,
+        lastReset: data.last_reset
+      };
     } catch (error) {
-      console.error('チャット使用確認エラー:', error);
+      console.error('使用量取得エラー:', error);
       
-      // オフラインモードの処理
-      // ローカルストレージから情報を取得
-      const isPremium = storage.getBoolean('is_premium') || false;
-      
-      // プレミアムユーザーは常に使用可能
-      if (isPremium) {
-        return true;
-      }
-      
-      const dayCount = storage.getNumber('chat_day_count') || 0;
-      const dayLimit = storage.getNumber('chat_day_limit') || 5;
-      const lastResetStr = storage.getString('chat_last_reset');
-      
-      // 最終リセット時間が記録されていない場合は使用可能
-      if (!lastResetStr) {
-        return true;
-      }
-      
-      // 最終リセットから24時間以上経過しているかどうかを確認
-      const lastReset = new Date(lastResetStr);
-      const now = new Date();
-      const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60);
-      
-      // 24時間以上経過していれば使用可能（ローカルのカウントをリセット）
-      if (hoursSinceReset >= 24) {
-        storage.set('chat_day_count', 0);
-        storage.set('chat_last_reset', now.toISOString());
-        return true;
-      }
-      
-      // 上限に達していなければ使用可能
-      return dayCount < dayLimit;
+      // オフライン時はローカルキャッシュから取得
+      return {
+        dayCount: storage.getNumber('chat_day_count') ?? 0,
+        dayLimit: storage.getNumber('chat_day_limit') ?? 5,
+        lastReset: storage.getString('chat_last_reset') ?? new Date().toISOString()
+      };
     }
   }
   
   /**
-   * 使用回数をインクリメント
+   * 利用記録の新規作成
    */
-  public async incrementUsage(userId: string): Promise<void> {
+  private async initializeUsage(userId: string): Promise<{
+    dayCount: number;
+    dayLimit: number;
+    lastReset: string;
+  }> {
+    const now = new Date().toISOString();
+    
     try {
-      // 現在の使用量を取得
       const { data, error } = await supabase
         .from('chat_usage')
-        .select('day_count')
-        .eq('user_id', userId)
+        .insert({
+          user_id: userId,
+          day_count: 0,
+          day_limit: 5, // 非プレミアムのデフォルト制限
+          last_reset: now
+        })
+        .select()
         .single();
       
-      // データがない場合は新しいレコードを作成
-      if (error && error.code === 'PGRST116') {
-        await this.initializeUsage(userId);
-        return;
-      } else if (error) {
-        throw error;
-      }
+      if (error) throw error;
       
-      // 使用量をインクリメント
-      const { error: updateError } = await supabase
-        .from('chat_usage')
-        .update({ day_count: data.day_count + 1 })
-        .eq('user_id', userId);
-      
-      if (updateError) throw updateError;
-      
-      // ローカルストレージも更新
-      const currentCount = storage.getNumber('chat_day_count') || 0;
-      storage.set('chat_day_count', currentCount + 1);
+      return {
+        dayCount: data.day_count,
+        dayLimit: data.day_limit,
+        lastReset: data.last_reset
+      };
     } catch (error) {
-      console.error('使用量インクリメントエラー:', error);
+      console.error('使用量初期化エラー:', error);
       
-      // オフラインモードの処理
-      const currentCount = storage.getNumber('chat_day_count') || 0;
-      storage.set('chat_day_count', currentCount + 1);
+      // オフライン時のフォールバック
+      storage.set('chat_day_count', 0);
+      storage.set('chat_day_limit', 5);
+      storage.set('chat_last_reset', now);
+      
+      return {
+        dayCount: 0,
+        dayLimit: 5,
+        lastReset: now
+      };
     }
   }
   
   /**
-   * 使用量のリセット（24時間経過時）
+   * 日次カウントをリセットする必要があるかチェック
    */
-  private async resetUsage(userId: string): Promise<void> {
+  private shouldResetDailyCount(lastReset: string): boolean {
+    const resetTime = new Date(lastReset);
+    const now = new Date();
+    const hoursSinceReset = (now.getTime() - resetTime.getTime()) / (1000 * 60 * 60);
+    
+    return hoursSinceReset >= 24;
+  }
+  
+  /**
+   * 日次カウントのリセット
+   */
+  private async resetDailyCount(userId: string): Promise<void> {
+    const now = new Date().toISOString();
+    
     try {
-      const now = new Date().toISOString();
-      
       const { error } = await supabase
         .from('chat_usage')
         .update({
@@ -162,38 +197,48 @@ export class ChatUsageService {
       
       if (error) throw error;
       
-      // ローカルストレージも更新
+      // ローカルキャッシュも更新
       storage.set('chat_day_count', 0);
       storage.set('chat_last_reset', now);
     } catch (error) {
-      console.error('使用量リセットエラー:', error);
+      console.error('日次カウントリセットエラー:', error);
     }
   }
   
   /**
-   * 初回使用時の使用量初期化
+   * 使用回数のインクリメント
    */
-  private async initializeUsage(userId: string): Promise<void> {
+  public async incrementUsage(userId: string): Promise<void> {
     try {
-      const now = new Date().toISOString();
+      // 現在の使用量を取得
+      const usage = await this.getDailyUsage(userId);
+      
+      // 最終リセットから24時間以上経過していればリセット
+      if (this.shouldResetDailyCount(usage.lastReset)) {
+        await this.resetDailyCount(userId);
+        usage.dayCount = 0;
+      }
+      
+      // 使用回数をインクリメント
+      const newCount = usage.dayCount + 1;
       
       const { error } = await supabase
         .from('chat_usage')
-        .insert({
-          user_id: userId,
-          day_count: 1, // 初回使用なので1からスタート
-          day_limit: 5, // フリーユーザーの1日の上限
-          last_reset: now
-        });
+        .update({
+          day_count: newCount
+        })
+        .eq('user_id', userId);
       
       if (error) throw error;
       
-      // ローカルストレージも更新
-      storage.set('chat_day_count', 1);
-      storage.set('chat_day_limit', 5);
-      storage.set('chat_last_reset', now);
+      // ローカルキャッシュも更新
+      storage.set('chat_day_count', newCount);
     } catch (error) {
-      console.error('使用量初期化エラー:', error);
+      console.error('使用量インクリメントエラー:', error);
+      
+      // オフライン時はローカルから取得してインクリメント
+      const currentCount = storage.getNumber('chat_day_count') ?? 0;
+      storage.set('chat_day_count', currentCount + 1);
     }
   }
 }
